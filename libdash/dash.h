@@ -19,7 +19,7 @@ extern "C" {
 #define CONV_2D_MAX 32767
 
 /*
- * Current open questions: 
+ * Current open questions:
  * 1. Should we be doing anything to stop the user from shooting themselves in the foot with divide-by-zero with that ZIP_DIV op?
  */
 
@@ -44,7 +44,7 @@ void DASH_GEMM_int_nb(dash_cmplx_int_type** A, dash_cmplx_int_type** B, dash_cmp
 
 /*
  * ${Comments about usage of DASH_BLAS_MADD}
- */ 
+ */
 void DASH_BLAS_MADD_flt(dash_cmplx_flt_type* A, dash_cmplx_flt_type* B, dash_cmplx_flt_type* C, size_t A_ROWS, size_t A_COLS);
 void DASH_BLAS_MADD_flt_nb(dash_cmplx_flt_type** A, dash_cmplx_flt_type** B, dash_cmplx_flt_type** C, size_t* A_ROWS, size_t* A_COLS, cedr_barrier_t* kernel_barrier);
 
@@ -53,7 +53,7 @@ void DASH_BLAS_MADD_int_nb(dash_cmplx_int_type** A, dash_cmplx_int_type** B, das
 
 /*
  * ${Comments about usage of DASH_BLAS_MSUB}
- */ 
+ */
 void DASH_BLAS_MSUB_flt(dash_cmplx_flt_type* A, dash_cmplx_flt_type* B, dash_cmplx_flt_type* C, size_t A_ROWS, size_t A_COLS);
 void DASH_BLAS_MSUB_flt_nb(dash_cmplx_flt_type** A, dash_cmplx_flt_type** B, dash_cmplx_flt_type** C, size_t* A_ROWS, size_t* A_COLS, cedr_barrier_t* kernel_barrier);
 
@@ -64,7 +64,7 @@ void DASH_BLAS_MSUB_int_nb(dash_cmplx_int_type** A, dash_cmplx_int_type** B, das
  * ${Comments about usage of DASH_BLAS_TRANSPOSE}
  *
  * conjugate: if true, performs a conjugate transpose
- */ 
+ */
 void DASH_BLAS_TRANSPOSE_flt(dash_cmplx_flt_type* in, dash_cmplx_flt_type* out, size_t ROWS, size_t COLS, bool conjugate);
 void DASH_BLAS_TRANSPOSE_flt_nb(dash_cmplx_flt_type** in, dash_cmplx_flt_type** out, size_t* ROWS, size_t* COLS, bool* conjugate, cedr_barrier_t* kernel_barrier);
 
@@ -86,6 +86,14 @@ void DASH_CONV_2D_int_nb(dash_re_int_type **input, int *height, int *width, dash
 
 void DASH_CONV_1D_flt(dash_re_flt_type* input, int size, dash_re_flt_type* mask, int mask_size, dash_re_flt_type* output);
 void DASH_CONV_1D_flt_nb(dash_re_flt_type** input, int* size, dash_re_flt_type** mask, int* mask_size, dash_re_flt_type** output, cedr_barrier_t* kernel_barrier);
+
+// Tutorial part 1.2.1
+
+void DASH_ZIP_flt(dash_cmplx_flt_type* input_1, dash_cmplx_flt_type* input_2, dash_cmplx_flt_type* output, size_t size, zip_op_t op);
+void DASH_ZIP_flt_nb(dash_cmplx_flt_type** input_1, dash_cmplx_flt_type** input_2, dash_cmplx_flt_type** output, size_t* size, zip_op_t* op, cedr_barrier_t* kernel_barrier);
+
+void DASH_ZIP_int(dash_cmplx_int_type* input_1, dash_cmplx_int_type* input_2, dash_cmplx_int_type* output, size_t size, zip_op_t op);
+void DASH_ZIP_int_nb(dash_cmplx_int_type** input_1, dash_cmplx_int_type** input_2, dash_cmplx_int_type** output, size_t* size, zip_op_t* op, cedr_barrier_t* kernel_barrier);
 
 #ifdef __cplusplus
 } // Close 'extern "C"'
