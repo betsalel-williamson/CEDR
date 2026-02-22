@@ -1,0 +1,16 @@
+# Run from CEDR repo root so the volume .:/root/repository/CEDR mounts this repo.
+name: cedr
+
+services:
+  cedr_tutorial:
+    image: uofarcl/cedr:tutorial_isfpga26
+    platform: linux/amd64
+    container_name: cedr_tutorial
+    # Keep the container running in the background (equivalent to -it)
+    tty: true
+    stdin_open: true
+    # Mount this repo into the container (run compose from repo root)
+    volumes:
+      - .:/root/repository/CEDR
+    # Start you right inside the working directory
+    working_dir: /root/repository/CEDR
