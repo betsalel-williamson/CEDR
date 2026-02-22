@@ -7,9 +7,49 @@ execution with streaming enabled; plots all frames of a given application.
 """
 import argparse
 import sys
+import threading
+import time
 
-import pandas as pd
-import plotly.graph_objects as go
+
+class Spinner:
+    """Show an indeterminate spinner on stderr. Message is updatable. Clears the line on exit."""
+
+    CHARS = ['|', '/', '-', '\\']
+
+    def __init__(self, message='Working...', stream=None):
+        self.message = message
+        self.stream = stream or sys.stderr
+        self._stop = threading.Event()
+        self._thread = None
+        self._had_other_output = False  # set True if stderr/stdout used so we clear the line above
+
+    def _spin(self):
+        i = 0
+        while not self._stop.is_set():
+            msg = self.message  # read current message each tick
+            c = self.CHARS[i % len(self.CHARS)]
+            self.stream.write('\r  {} {}'.format(c, msg))
+            self.stream.flush()
+            i += 1
+            self._stop.wait(0.08)
+
+    def __enter__(self):
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+        time.sleep(0.03)  # Brief pause so first frame is visible
+        return self
+
+    def __exit__(self, *args):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        # Clear spinner line so it disappears
+        if self._had_other_output:
+            self.stream.write('\033[A\r\033[K')  # move up one line, then clear
+        else:
+            self.stream.write('\r\033[K')  # cursor still on spinner line
+        self.stream.flush()
+        return False
 
 # Match gantt_k-nk.py color scheme (task % 5)
 COLOR_CHOICES = ['firebrick', 'midnightblue', 'lightskyblue', 'dodgerblue', 'green']
@@ -25,8 +65,8 @@ def load_trace(input_path):
     Returns DataFrame with Processor, Start, Finish, Duration_ms, TaskType,
     TaskTypeLabel, TaskId, Job, Task.
     """
-    # Trace uses ", " between fields; may have 10+ fields (actual_exe_time, etc.).
-    raw = pd.read_csv(input_path, header=None, encoding='utf-8', sep=', ')
+    # Single-char sep=',' for C engine speed; trace has 10 comma-separated fields, we use first 7.
+    raw = pd.read_csv(input_path, header=None, encoding='utf-8', sep=',')
     if raw.empty:
         return pd.DataFrame(columns=[
             'Processor', 'Start', 'Finish', 'Duration_ms',
@@ -136,14 +176,14 @@ def show_gantt_plotly(df, output_html='gantt.html', output_png=None):
         margin=dict(b=60, t=80),
     )
     fig.write_html(output_html)
-    print(f"Wrote interactive chart to {output_html}")
-
+    png_path = None
     if output_png:
         try:
             fig.write_image(output_png)
-            print(f"Wrote static PNG to {output_png}")
+            png_path = output_png
         except Exception as e:
             sys.stderr.write(f"Could not write PNG (install kaleido: pip install kaleido): {e}\n")
+    return output_html, png_path
 
 
 def generate_argparser():
@@ -170,9 +210,26 @@ if __name__ == '__main__':
     argparser = generate_argparser()
     args = argparser.parse_args()
 
-    df = load_trace(args.inputFile)
-    show_gantt_plotly(
-        df,
-        output_html=args.output,
-        output_png=args.png,
-    )
+    # Spinner covers imports + load + build (pandas/plotly are heavy; defer so spinner shows first)
+    with Spinner('Loading trace...') as spinner:
+        import pandas as pd
+        import plotly.graph_objects as go
+        # Inject so load_trace / show_gantt_plotly see them
+        globals()['pd'] = pd
+        globals()['go'] = go
+        df = load_trace(args.inputFile)
+
+        if df.empty:
+            spinner._had_other_output = True
+            sys.stderr.write('No schedule events to plot.\n')
+            sys.exit(1)
+
+        spinner.message = 'Building chart...'
+        output_html, output_png_written = show_gantt_plotly(
+            df,
+            output_html=args.output,
+            output_png=args.png,
+        )
+    print(f"Wrote interactive chart to {output_html}")
+    if output_png_written:
+        print(f"Wrote static PNG to {output_png_written}")
