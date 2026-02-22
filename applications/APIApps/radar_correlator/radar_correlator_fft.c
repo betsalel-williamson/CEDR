@@ -170,9 +170,24 @@ int main(void)
     }
 
     // Multiplication
-    for (i = 0; i < 2 * len; i += 2) {
-        corr_freq[i] = (X1[i] * X2[i]) + (X1[i + 1] * X2[i + 1]);
-        corr_freq[i + 1] = (X1[i + 1] * X2[i]) - (X1[i] * X2[i + 1]);
+    // for (i = 0; i < 2 * len; i += 2) {
+    //     corr_freq[i] = (X1[i] * X2[i]) + (X1[i + 1] * X2[i + 1]);
+    //     corr_freq[i + 1] = (X1[i + 1] * X2[i]) - (X1[i] * X2[i + 1]);
+    // }
+
+    dash_cmplx_flt_type *zip_inp0 = (dash_cmplx_flt_type*) malloc(len * sizeof(dash_cmplx_flt_type));
+    dash_cmplx_flt_type *zip_inp1 = (dash_cmplx_flt_type*) malloc(len * sizeof(dash_cmplx_flt_type));
+    dash_cmplx_flt_type *zip_out = (dash_cmplx_flt_type*) malloc(len * sizeof(dash_cmplx_flt_type));
+    for (size_t i = 0; i < len; i++) {
+      zip_inp0[i].re = (dash_re_flt_type) X1[2*i];
+      zip_inp0[i].im = (dash_re_flt_type) X1[2*i+1];
+      zip_inp1[i].re = (dash_re_flt_type) X2[2*i];
+      zip_inp1[i].im = (dash_re_flt_type) -X2[2*i+1]; // Conj Multiplication
+    }
+    DASH_ZIP_flt(zip_inp0, zip_inp1, zip_out, len, ZIP_MULT);
+    for (size_t i = 0; i < len; i++) {
+      corr_freq[2*i]   = (double) zip_out[i].re;
+      corr_freq[2*i+1] = (double) zip_out[i].im;
     }
 
     // IFFT
