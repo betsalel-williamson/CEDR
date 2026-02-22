@@ -5,97 +5,76 @@ Same input as gantt_k-nk.py (ZCU102 trace CSV). Produces an interactive HTML cha
 with zoom, pan, hover tooltips, and legend click-to-toggle. Intended for daemon-based
 execution with streaming enabled; plots all frames of a given application.
 """
-import csv
 import argparse
 import sys
-from collections import namedtuple
 
+import pandas as pd
 import plotly.graph_objects as go
-
-ScheduleEvent = namedtuple('ScheduleEvent', 'job task start end proc id_string')
 
 # Match gantt_k-nk.py color scheme (task % 5)
 COLOR_CHOICES = ['firebrick', 'midnightblue', 'lightskyblue', 'dodgerblue', 'green']
 TASK_TYPE_LABELS = [f'TASK_ID ({(i)}+5n)' for i in range(5)]
 
 
-def load_proc_schedules(input_path):
+def load_trace(input_path):
     """
-    Parse trace CSV into proc_schedules dict, matching gantt_k-nk.py logic exactly.
-    Returns (proc_schedules, start_offset).
+    Load ZCU102 trace CSV into a plot-ready DataFrame.
+    Trace format: no header; each row has "Key: value" fields separated by ", ".
+    We use the first 7 fields by position (key names may be e.g. app_id, app_name,
+    task_id, task_name, resource_name, ref_start_time, ref_stop_time).
+    Returns DataFrame with Processor, Start, Finish, Duration_ms, TaskType,
+    TaskTypeLabel, TaskId, Job, Task.
     """
-    with open(input_path, newline='', encoding='utf-8') as f:
-        lines = f.readlines()
-    lines_parsed = [(x.strip()).split(", ") for x in lines]
-    start = sys.maxsize
-    for elem in lines_parsed:
-        start = min(start, int((elem[5].split(": "))[1]))
+    # Trace uses ", " between fields; may have 10+ fields (actual_exe_time, etc.).
+    raw = pd.read_csv(input_path, header=None, encoding='utf-8', sep=', ')
+    if raw.empty:
+        return pd.DataFrame(columns=[
+            'Processor', 'Start', 'Finish', 'Duration_ms',
+            'TaskType', 'TaskTypeLabel', 'TaskId', 'Job', 'Task'
+        ])
+    # Use first 7 columns only (Job, Name, Task, Task name, Proc, Start, End).
+    raw = raw.iloc[:, :7]
 
-    proc_schedules = {}
-    with open(input_path, newline='') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            job_id = row[0].split(':')[1].strip()
-            job_name = row[1].split(':')[1].strip()
-            task_id = row[2].split(':')[1].strip()
-            task_name = row[3].split(':')[1].strip()
-            proc_name = row[4].split(':')[1].strip()
-            start_time = row[5].split(':')[1].strip()
-            end_time = row[6].split(':')[1].strip()
-            task_identifier = job_name + '_' + job_id + '-' + task_name
-            schedule_event = ScheduleEvent(
-                int(job_id), int(task_id),
-                (int(start_time) - start), (int(end_time) - start),
-                proc_name, task_identifier
-            )
-            if proc_name in proc_schedules:
-                proc_schedules[proc_name].append(schedule_event)
-            else:
-                proc_schedules[proc_name] = [schedule_event]
+    def extract_value(ser):
+        return ser.astype(str).str.split(': ', n=1).str.get(1).str.strip()
 
-    return proc_schedules, start
+    raw.columns = ['Job', 'Name', 'Task', 'TaskName', 'Proc', 'Start', 'End']
+    df = pd.DataFrame()
+    df['Job'] = extract_value(raw['Job']).astype(int)
+    df['Name'] = extract_value(raw['Name'])
+    df['Task'] = extract_value(raw['Task']).astype(int)
+    df['TaskName'] = extract_value(raw['TaskName'])
+    df['Processor'] = extract_value(raw['Proc'])
+    df['Start_ns'] = extract_value(raw['Start']).astype(int)
+    df['End_ns'] = extract_value(raw['End']).astype(int)
 
+    start_offset = df['Start_ns'].min()
+    df['Start'] = (df['Start_ns'] - start_offset) / 1e6
+    df['Finish'] = (df['End_ns'] - start_offset) / 1e6
+    df['Duration_ms'] = df['Finish'] - df['Start']
+    df['TaskType'] = df['Task'] % 5
+    df['TaskTypeLabel'] = df['TaskType'].map(lambda i: TASK_TYPE_LABELS[i])
+    df['TaskId'] = df['Name'] + '_' + df['Job'].astype(str) + '-' + df['TaskName']
 
-def build_timeline_df(proc_schedules):
-    """Build list of dicts with Start/Finish in ms and task type, for Bar traces."""
-    processors = sorted(proc_schedules.keys())
-    rows = []
-    for proc in processors:
-        for job in proc_schedules[proc]:
-            start_ms = job.start / 1e6
-            finish_ms = job.end / 1e6
-            task_type = job.task % 5
-            rows.append({
-                'Processor': proc,
-                'Start': start_ms,
-                'Finish': finish_ms,
-                'Duration_ms': finish_ms - start_ms,
-                'TaskType': task_type,
-                'TaskTypeLabel': TASK_TYPE_LABELS[task_type],
-                'TaskId': job.id_string,
-                'Job': job.job,
-                'Task': job.task,
-            })
-    return rows
+    return df[['Processor', 'Start', 'Finish', 'Duration_ms', 'TaskType', 'TaskTypeLabel', 'TaskId', 'Job', 'Task']]
 
 
-def show_gantt_plotly(proc_schedules, output_html='gantt.html', output_png=None):
+def show_gantt_plotly(df, output_html='gantt.html', output_png=None):
     """
-    Build and save an interactive Plotly Gantt chart from proc_schedules.
+    Build and save an interactive Plotly Gantt chart from a plot-ready DataFrame.
     Uses go.Bar (horizontal bars with base=start, x=duration) so the x-axis is
     linear Time (ms). px.timeline would interpret numeric values as datetimes.
     """
-    rows = build_timeline_df(proc_schedules)
-    if not rows:
+    if df.empty:
         sys.stderr.write("No schedule events to plot.\n")
         return
 
-    processors = sorted(proc_schedules.keys())
+    processors = sorted(df['Processor'].unique())
 
     fig = go.Figure()
     for task_type in range(5):
-        subset = [r for r in rows if r['TaskType'] == task_type]
-        if not subset:
+        subset = df[df['TaskType'] == task_type]
+        if subset.empty:
             # Empty category (e.g. no TASK_ID 4+5n): legend entry only, no bar
             fig.add_trace(go.Bar(
                 x=[], y=[], base=[], orientation='h',
@@ -105,15 +84,19 @@ def show_gantt_plotly(proc_schedules, output_html='gantt.html', output_png=None)
                 legendgroup=TASK_TYPE_LABELS[task_type],
             ))
             continue
+        customdata = list(zip(
+            subset['TaskId'], subset['Job'], subset['Task'],
+            subset['Duration_ms'].round(2), subset['Start'], subset['Finish']
+        ))
         fig.add_trace(go.Bar(
-            x=[r['Duration_ms'] for r in subset],
-            y=[r['Processor'] for r in subset],
-            base=[r['Start'] for r in subset],
+            x=subset['Duration_ms'].tolist(),
+            y=subset['Processor'].tolist(),
+            base=subset['Start'].tolist(),
             orientation='h',
             name=TASK_TYPE_LABELS[task_type],
             marker_color=COLOR_CHOICES[task_type],
             legendgroup=TASK_TYPE_LABELS[task_type],
-            customdata=[[r['TaskId'], r['Job'], r['Task'], round(r['Duration_ms'], 2), r['Start'], r['Finish']] for r in subset],
+            customdata=customdata,
             hovertemplate=(
                 '<b>%{y}</b><br>'
                 'TaskId: %{customdata[0]}<br>'
@@ -187,9 +170,9 @@ if __name__ == '__main__':
     argparser = generate_argparser()
     args = argparser.parse_args()
 
-    proc_schedules, _ = load_proc_schedules(args.inputFile)
+    df = load_trace(args.inputFile)
     show_gantt_plotly(
-        proc_schedules,
+        df,
         output_html=args.output,
         output_png=args.png,
     )
